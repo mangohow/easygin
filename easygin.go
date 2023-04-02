@@ -2,18 +2,46 @@ package easygin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/elliotchance/pie/v2"
 	"github.com/gin-gonic/gin"
 	"log"
 	"net/http"
+	"net/url"
 	"reflect"
+	"strconv"
+	"strings"
 	"time"
 )
 
 /*
-	Using reflection to modify the handler has a performance
-	loss of approximately 20%, but compared to business processing, this loss is small
+	use easygin to register controller:
+	NOTE: the first parameter must be the type of *gin.Context
+	1.bind values from body to struct, you can use the following forms:
+		type User struct {
+			Id int `json:"id"`
+			Username string `json:"username"`
+		}
+		1.1 func mycontroller(ctx *gin.Context, u User) *Result
+		1.2 func mycontroller(ctx *gin.Context, u *User) *Result
+	NOTE: using this method will reduce performance by 20%, 2500ns/op --> 3000ns/op
+
+	2.bind values from url(etc.: id=1&username=aabb), you can use the following forms:
+		type User struct {
+			Id int `form:"id"`
+			Username string `form:"username"`
+		}
+		2.1 func mycontroller(ctx *gin.Context, u User) *Result
+		2.2 func mycontroller(ctx *gin.Context, u *User) *Result
+	NOTE: using this method will reduce performance by 20%, 2200ns/op --> 2700ns/op
+
+	3. get values from url(etc.: id=1&username=aabb)(supported types are int(int, int8 ...), uint(uint, uint8...), string),
+       you can use the following forms:
+	   Note: The order of parameters in the function must be consistent with the key value pairs in the url
+		3.1 func mycontroller(ctx *gin.Context, id int, username string) *Result
+	NOTE: using this method can significantly reduce data acquisition performance, 50ns/op --> 1800ns/op
+		  but for the business, this loss can be negligible
 */
 
 type EasyGin struct {
@@ -164,8 +192,8 @@ func ginHandlers(handlers ...Handler) []gin.HandlerFunc {
 		}
 
 		// check the number of parameters
-		if ft.NumIn() <= 0 || ft.NumIn() > 2 {
-			panic("handler must have one or two parameter")
+		if ft.NumIn() <= 0 {
+			panic("handler must have at least one parameter")
 		}
 
 		// check whether the first parameter is of type *gin.Context
@@ -188,12 +216,12 @@ func ginHandlers(handlers ...Handler) []gin.HandlerFunc {
 		return func(ctx *gin.Context) {
 			inValues := make([]reflect.Value, 0, ft.NumIn())
 			inValues = append(inValues, reflect.ValueOf(ctx))
+			queryVals := &queryValues{}
 
 			for i := 1; i < ft.NumIn(); i++ {
 				in := ft.In(i)
-				val, err := bindParam(in, ctx)
+				val, err := bindParam(in, ctx, queryVals)
 				if err != nil {
-					fmt.Println(err)
 					return
 				}
 				inValues = append(inValues, val)
@@ -211,7 +239,7 @@ func ginHandlers(handlers ...Handler) []gin.HandlerFunc {
 	})
 }
 
-func bindParam(in reflect.Type, ctx *gin.Context) (reflect.Value, error) {
+func bindParam(in reflect.Type, ctx *gin.Context, queryVals *queryValues) (reflect.Value, error) {
 	isPointer := false
 	if in.Kind() == reflect.Pointer {
 		in = in.Elem()
@@ -221,18 +249,64 @@ func bindParam(in reflect.Type, ctx *gin.Context) (reflect.Value, error) {
 
 	switch in.Kind() {
 	case reflect.Struct:
-		err := ctx.Bind(inVal.Interface())
-		if err != nil {
-			return reflect.Value{}, err
-		}
-		if ctx.Request.Method == http.MethodGet && ctx.ContentType() == ContentTypeJson {
+		// bind from url
+		if ctx.Request.ContentLength == 0 {
+			err := ctx.BindQuery(inVal.Interface())
+			if err != nil {
+				return reflect.Value{}, err
+			}
+
+		} else if ctx.ContentType() == ContentTypeJson { // bind json from body
 			err := ctx.BindJSON(inVal.Interface())
 			if err != nil {
-				fmt.Println(err)
+				return reflect.Value{}, err
+			}
+
+		} else {
+			err := ctx.Bind(inVal.Interface())
+			if err != nil {
 				return reflect.Value{}, err
 			}
 		}
 
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.String:
+		if !queryVals.inited {
+			if ctx.Request.URL.RawQuery == "" {
+				return reflect.Value{}, errors.New("query is empty")
+			}
+			err := parseQuery(ctx.Request.URL.RawQuery, queryVals)
+			if err != nil {
+				return reflect.Value{}, err
+			}
+		}
+		if queryVals.index >= len(queryVals.keys) {
+			return reflect.Value{}, errors.New("query is empty")
+		}
+		key := queryVals.keys[queryVals.index]
+		queryVals.index++
+		if key == "" {
+			return reflect.Value{}, errors.New("get query key error")
+		}
+
+		v := queryVals.kvs[key]
+		switch in.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			n, err := strconv.ParseInt(v[0], 10, 64)
+			if err != nil {
+				return reflect.Value{}, err
+			}
+			inVal.Elem().SetInt(int64(n))
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			n, err := strconv.ParseUint(v[0], 10, 64)
+			if err != nil {
+				return reflect.Value{}, err
+			}
+			inVal.Elem().SetUint(uint64(n))
+		case reflect.String:
+			inVal.Elem().SetString(v[0])
+		}
 	}
 
 	if isPointer {
@@ -240,4 +314,54 @@ func bindParam(in reflect.Type, ctx *gin.Context) (reflect.Value, error) {
 	}
 
 	return inVal.Elem(), nil
+}
+
+type queryValues struct {
+	kvs    map[string][]string
+	keys   []string
+	index  int
+	inited bool
+}
+
+func parseQuery(query string, values *queryValues) (err error) {
+	kvsc := strings.Count(query, "&") + 1
+	values.kvs = make(map[string][]string, kvsc)
+	values.keys = make([]string, 0, kvsc)
+
+	for query != "" {
+		var key string
+		key, query, _ = strings.Cut(query, "&")
+		if strings.Contains(key, ";") {
+			err = fmt.Errorf("invalid semicolon separator in query")
+			continue
+		}
+		if key == "" {
+			continue
+		}
+		key, value, _ := strings.Cut(key, "=")
+		key, err1 := url.QueryUnescape(key)
+		if err1 != nil {
+			if err == nil {
+				err = err1
+			}
+			continue
+		}
+		value, err1 = url.QueryUnescape(value)
+		if err1 != nil {
+			if err == nil {
+				err = err1
+			}
+			continue
+		}
+
+		vals, ok := values.kvs[key]
+		if !ok {
+			values.keys = append(values.keys, key)
+		}
+		values.kvs[key] = append(vals, value)
+	}
+
+	values.inited = true
+
+	return
 }
