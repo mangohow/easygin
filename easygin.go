@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"github.com/elliotchance/pie/v2"
 	"github.com/gin-gonic/gin"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -63,6 +65,12 @@ func New() *EasyGin {
 
 func NewWithEngine(r *gin.Engine) *EasyGin {
 	return &EasyGin{Engine: r}
+}
+
+var elog = log.New(os.Stderr, "EasyGin", log.LstdFlags)
+
+func SetLogOutput(out io.Writer) {
+	elog.SetOutput(out)
 }
 
 // Handler must be in one of the following forms
@@ -122,7 +130,7 @@ func (e *EasyGin) setupSignal() {
 				ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*5)
 				defer cancelFunc()
 				if err := e.Server.Shutdown(ctx); err != nil {
-					log.Printf("An error occurs when Server shut:%v", err)
+					elog.Printf("An error occurs when Server shut:%v", err)
 				}
 
 				for _, handler := range e.afterCloseHandler {

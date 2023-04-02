@@ -5,7 +5,6 @@ package easygin
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path"
 	"runtime"
@@ -48,18 +47,18 @@ func (p *Profile) startBlockProfile() {
 	name := createDumpFile(ppf)
 	f, err := os.Create(name)
 	if err != nil {
-		log.Printf("profile: could not create %s profile, err:%v", ppf, err)
+		elog.Printf("profile: could not create %s profile, err:%v", ppf, err)
 		return
 	}
 
 	runtime.SetBlockProfileRate(1)
-	log.Printf("profile: %s profiling enabled, %s", ppf, name)
+	elog.Printf("profile: %s profiling enabled, %s", ppf, name)
 
 	p.closers = append(p.closers, func() {
 		_ = pprof.Lookup(ppf).WriteTo(f, 0)
 		_ = f.Close()
 		runtime.SetBlockProfileRate(0)
-		log.Printf("profile: %s profiling disabled, %s", ppf, name)
+		elog.Printf("profile: %s profiling disabled, %s", ppf, name)
 	})
 }
 
@@ -68,17 +67,17 @@ func (p *Profile) startCpuProfile() {
 	name := createDumpFile(ppf)
 	f, err := os.Create(name)
 	if err != nil {
-		log.Printf("profile: could not create %s profile, err:%v", ppf, err)
+		elog.Printf("profile: could not create %s profile, err:%v", ppf, err)
 		return
 	}
 
 	_ = pprof.StartCPUProfile(f)
-	log.Printf("profile: %s profiling enabled, %s", ppf, name)
+	elog.Printf("profile: %s profiling enabled, %s", ppf, name)
 
 	p.closers = append(p.closers, func() {
 		pprof.StopCPUProfile()
 		_ = f.Close()
-		log.Printf("profile: %s profiling disabled, %s", ppf, name)
+		elog.Printf("profile: %s profiling disabled, %s", ppf, name)
 	})
 }
 
@@ -87,19 +86,19 @@ func (p *Profile) startMemProfile() {
 	name := createDumpFile(ppf)
 	f, err := os.Create(name)
 	if err != nil {
-		log.Printf("profile: could not create %s profile, err:%v", ppf, err)
+		elog.Printf("profile: could not create %s profile, err:%v", ppf, err)
 		return
 	}
 
 	old := runtime.MemProfileRate
 	runtime.MemProfileRate = DefaultMemProfileRate
-	log.Printf("profile: %s profiling enabled (rate %d), %s", ppf, DefaultMemProfileRate, name)
+	elog.Printf("profile: %s profiling enabled (rate %d), %s", ppf, DefaultMemProfileRate, name)
 
 	p.closers = append(p.closers, func() {
 		pprof.Lookup("heap").WriteTo(f, 0)
 		_ = f.Close()
 		runtime.MemProfileRate = old
-		log.Printf("profile: %s profiling disabled, %s", ppf, name)
+		elog.Printf("profile: %s profiling disabled, %s", ppf, name)
 	})
 }
 
@@ -108,12 +107,12 @@ func (p *Profile) startMutexProfile() {
 	name := createDumpFile(ppf)
 	f, err := os.Create(name)
 	if err != nil {
-		log.Printf("profile: could not create %s profile, err:%v", ppf, err)
+		elog.Printf("profile: could not create %s profile, err:%v", ppf, err)
 		return
 	}
 
 	runtime.SetMutexProfileFraction(1)
-	log.Printf("profile: %s profiling enabled, %s", ppf, name)
+	elog.Printf("profile: %s profiling enabled, %s", ppf, name)
 
 	p.closers = append(p.closers, func() {
 		if mp := pprof.Lookup(ppf); mp != nil {
@@ -121,7 +120,7 @@ func (p *Profile) startMutexProfile() {
 		}
 		_ = f.Close()
 		runtime.SetMutexProfileFraction(0)
-		log.Printf("profile: %s profiling disabled, %s", ppf, name)
+		elog.Printf("profile: %s profiling disabled, %s", ppf, name)
 	})
 }
 
@@ -130,18 +129,18 @@ func (p *Profile) startThreadCreateProfile() {
 	name := createDumpFile(ppf)
 	f, err := os.Create(name)
 	if err != nil {
-		log.Printf("profile: could not create %s profile, err:%v", ppf, err)
+		elog.Printf("profile: could not create %s profile, err:%v", ppf, err)
 		return
 	}
 
-	log.Printf("profile: %s profiling enabled, %s", ppf, name)
+	elog.Printf("profile: %s profiling enabled, %s", ppf, name)
 
 	p.closers = append(p.closers, func() {
 		if mp := pprof.Lookup(ppf); mp != nil {
 			_ = mp.WriteTo(f, 0)
 		}
 		_ = f.Close()
-		log.Printf("profile: %s profiling disabled, %s", ppf, name)
+		elog.Printf("profile: %s profiling disabled, %s", ppf, name)
 	})
 }
 
@@ -150,20 +149,20 @@ func (p *Profile) startTraceProfile() {
 	name := createDumpFile(ppf)
 	f, err := os.Create(name)
 	if err != nil {
-		log.Printf("profile: could not create %s profile, err:%v", ppf, err)
+		elog.Printf("profile: could not create %s profile, err:%v", ppf, err)
 		return
 	}
 
 	if err = trace.Start(f); err != nil {
-		log.Printf("profile: could not start trace: %v", err)
+		elog.Printf("profile: could not start trace: %v", err)
 		return
 	}
 
-	log.Printf("profile: %s profiling enabled, %s", ppf, name)
+	elog.Printf("profile: %s profiling enabled, %s", ppf, name)
 
 	p.closers = append(p.closers, func() {
 		trace.Stop()
-		log.Printf("profile: %s profiling disabled, %s", ppf, name)
+		elog.Printf("profile: %s profiling disabled, %s", ppf, name)
 	})
 }
 
@@ -177,7 +176,7 @@ func (p *Profile) Stop() {
 
 func StartProfile() Stopper {
 	if !atomic.CompareAndSwapUint32(&started, 0, 1) {
-		log.Printf("profile: Start() already called")
+		elog.Printf("profile: Start() already called")
 		return fakeStopper{}
 	}
 
