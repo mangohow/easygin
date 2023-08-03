@@ -3,11 +3,12 @@ package easygin
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/gin-gonic/gin"
 	"net/http"
 	"net/url"
 	"strconv"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 /*
@@ -35,7 +36,17 @@ type User struct {
 
 func TestEasyGin(t *testing.T) {
 	easyGin := New()
-	easyGin.GET("/", func(ctx *gin.Context, user User) *Result {
+	easyGin.GET("/hello", func(ctx *gin.Context, user User) *Result {
+		fmt.Println(user)
+		return nil
+	})
+
+	easyGin.GET("/helloworld", func(ctx *gin.Context, user User) *Result {
+		fmt.Println(user)
+		return nil
+	})
+
+	easyGin.GET("/hello/world", func(ctx *gin.Context, user User) *Result {
 		fmt.Println(user)
 		return nil
 	})
