@@ -41,7 +41,17 @@ func TestEasyGin(t *testing.T) {
 		return nil
 	})
 
-	easyGin.GET("/helloworld", func(ctx *gin.Context, user User) *Result {
+	easyGin.GET("/noparam", func() *Result {
+		fmt.Println("no param")
+		return nil
+	})
+
+	easyGin.GET("/noctx", func(ctx *gin.Context) *Result {
+		fmt.Println(ctx)
+		return nil
+	})
+
+	easyGin.GET("/helloworld", func(user User) *Result {
 		fmt.Println(user)
 		return nil
 	})
@@ -108,12 +118,12 @@ func TestEasyGin(t *testing.T) {
 func TestFunction(t *testing.T) {
 	easyGin := New()
 	easyGin.POST("/post", func(ctx *gin.Context, user *User) *Result {
-		return Ok(user, "ok")
+		return Ok(user)
 	})
 
 	group := easyGin.Group("/api")
 	group.POST("/post", func(ctx *gin.Context, user *User) *Result {
-		return Ok(user, "ok")
+		return Ok(user)
 	})
 
 	easyGin.SetAfterCloseHandlers(func() {

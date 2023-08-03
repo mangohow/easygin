@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/elliotchance/pie/v2"
-	"github.com/gin-gonic/gin"
 	"io"
 	"log"
 	"net/http"
@@ -15,6 +13,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/elliotchance/pie/v2"
+	"github.com/gin-gonic/gin"
 )
 
 /*
@@ -199,40 +200,34 @@ func ginHandlers(handlers ...Handler) []gin.HandlerFunc {
 			panic("handler must be func type")
 		}
 
-		// check the number of parameters
-		if ft.NumIn() <= 0 {
-			panic("handler must have at least one parameter")
-		}
-
-		// check whether the first parameter is of type *gin.Context
-		in0 := ft.In(0)
-		if in0 != ginCtxType {
-			panic("first parameter must be *gin.Context type")
-		}
-
-		// check the return value type, the type must be *Result
-		// and return value count must be one
+		// 检查返回值类型，返回值必须只有一个，并且是*Result类型
 		if ft.NumOut() == 0 || ft.NumOut() > 1 {
 			panic("return value must have one and be *Result type")
 		}
-
 		outt := ft.Out(0)
 		if outt != outType {
 			panic("return value must be *Result type")
 		}
 
 		return func(ctx *gin.Context) {
+			// 入参可以有0个或多个
 			inValues := make([]reflect.Value, 0, ft.NumIn())
-			inValues = append(inValues, reflect.ValueOf(ctx))
-			queryVals := &queryValues{}
-
-			for i := 1; i < ft.NumIn(); i++ {
-				in := ft.In(i)
-				val, err := bindParam(in, ctx, queryVals)
-				if err != nil {
-					return
+			if ft.NumIn() > 0 {
+				queryVals := &queryValues{}
+				for i := 0; i < ft.NumIn(); i++ {
+					in := ft.In(i)
+					// 如果当前类型为*gin.Context，则将ctx注入
+					if in == ginCtxType {
+						inValues = append(inValues, reflect.ValueOf(ctx))
+						continue
+					}
+					// 否则，从gin中取出注入
+					val, err := bindParam(in, ctx, queryVals)
+					if err != nil {
+						return
+					}
+					inValues = append(inValues, val)
 				}
-				inValues = append(inValues, val)
 			}
 
 			outVals := fv.Call(inValues)
