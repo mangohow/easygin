@@ -49,9 +49,10 @@ import (
 
 type EasyGin struct {
 	*gin.Engine
-	Server            *http.Server
-	signalHandler     func()
-	afterCloseHandler []func()
+	Server             *http.Server
+	signalHandler      func()
+	afterCloseHandlers []func()
+	maxGraceDuration   time.Duration
 }
 
 type RouterGroup struct {
@@ -60,12 +61,17 @@ type RouterGroup struct {
 
 func New() *EasyGin {
 	return &EasyGin{
-		Engine: gin.New(),
+		Engine:           gin.New(),
+		maxGraceDuration: time.Second * 10,
 	}
 }
 
 func NewWithEngine(r *gin.Engine) *EasyGin {
 	return &EasyGin{Engine: r}
+}
+
+func (e *EasyGin) SetMaxGraceDuration(max time.Duration) {
+	e.maxGraceDuration = max
 }
 
 var elog = log.New(os.Stderr, "EasyGin", log.LstdFlags)
@@ -121,21 +127,21 @@ func (e *EasyGin) SetSignalHandler(f func()) {
 
 // SetAfterCloseHandlers register handlers which will be called after server closed
 func (e *EasyGin) SetAfterCloseHandlers(handlers ...func()) {
-	e.afterCloseHandler = append(e.afterCloseHandler, handlers...)
+	e.afterCloseHandlers = append(e.afterCloseHandlers, handlers...)
 }
 
 func (e *EasyGin) setupSignal() {
 	if e.signalHandler == nil {
 		e.signalHandler = func() {
 			SetupSignal(func() {
-				ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*5)
+				for _, handler := range e.afterCloseHandlers {
+					handler()
+				}
+
+				ctx, cancelFunc := context.WithTimeout(context.Background(), e.maxGraceDuration)
 				defer cancelFunc()
 				if err := e.Server.Shutdown(ctx); err != nil {
 					elog.Printf("An error occurs when Server shut:%v", err)
-				}
-
-				for _, handler := range e.afterCloseHandler {
-					handler()
 				}
 			})
 		}
