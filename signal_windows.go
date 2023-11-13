@@ -4,20 +4,26 @@
 package easygin
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"syscall"
 )
 
-func SetupSignal(fn func()) {
-	c := make(chan os.Signal, 1)
+var onlyOneSignalHandler = make(chan struct{})
+
+func SetupSignalHandler() context.Context {
+	close(onlyOneSignalHandler)
+	c := make(chan os.Signal, 2)
+	ctx, cancle := context.WithCancel(context.Background())
 	signal.Notify(c, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGINT)
 
-	select {
-	case sig := <-c:
-		switch sig {
-		case syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGINT:
-			fn()
-		}
-	}
+	go func() {
+		<-c
+		cancle()
+		<-c
+		os.Exit(0)
+	}()
+
+	return ctx
 }

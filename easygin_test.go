@@ -2,7 +2,9 @@ package easygin
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -36,67 +38,67 @@ type User struct {
 
 func TestEasyGin(t *testing.T) {
 	easyGin := New()
-	easyGin.GET("/hello", func(ctx *gin.Context, user User) *Result {
+	easyGin.GET("/hello", func(ctx *gin.Context, user User) *Response {
 		fmt.Println(user)
 		return nil
 	})
 
-	easyGin.GET("/noparam", func() *Result {
+	easyGin.GET("/noparam", func() *Response {
 		fmt.Println("no param")
 		return nil
 	})
 
-	easyGin.GET("/noctx", func(ctx *gin.Context) *Result {
+	easyGin.GET("/noctx", func(ctx *gin.Context) *Response {
 		fmt.Println(ctx)
 		return nil
 	})
 
-	easyGin.GET("/helloworld", func(user User) *Result {
+	easyGin.GET("/helloworld", func(user User) *Response {
 		fmt.Println(user)
 		return nil
 	})
 
-	easyGin.GET("/hello/world", func(ctx *gin.Context, user User) *Result {
+	easyGin.GET("/hello/world", func(ctx *gin.Context, user User) *Response {
 		fmt.Println(user)
 		return nil
 	})
 
-	easyGin.GET("/query", func(ctx *gin.Context, id int, username string) *Result {
+	easyGin.GET("/query", func(ctx *gin.Context, id int, username string) *Response {
 		fmt.Println(id, username)
 		return nil
 	})
 
-	easyGin.GET("/queryPointer", func(ctx *gin.Context, id *int, username *string) *Result {
+	easyGin.GET("/queryPointer", func(ctx *gin.Context, id *int, username *string) *Response {
 		fmt.Println(*id, *username)
 		return nil
 	})
 
-	easyGin.POST("/", func(ctx *gin.Context, user User) *Result {
+	easyGin.POST("/", func(ctx *gin.Context, user User) *Response {
 		fmt.Println(user)
 		return nil
 	})
 
-	easyGin.PUT("/", func(ctx *gin.Context, user User) *Result {
+	easyGin.PUT("/", func(ctx *gin.Context, user User) *Response {
 		fmt.Println(user)
 		return nil
 	})
 
-	easyGin.DELETE("/", func(ctx *gin.Context, user User) *Result {
+	easyGin.DELETE("/", func(ctx *gin.Context, user User) *Response {
 		fmt.Println(user)
 		return nil
 	})
 
-	easyGin.HEAD("/", func(ctx *gin.Context, user User) *Result {
+	easyGin.HEAD("/", func(ctx *gin.Context, user User) *Response {
 		fmt.Println(user)
 		return nil
 	})
 
-	easyGin.GET("/pointer", func(ctx *gin.Context, user *User) *Result {
+	easyGin.GET("/pointer", func(ctx *gin.Context, user *User) *Response {
 		fmt.Println(user)
 		return nil
 	})
 
-	easyGin.POST("/post", func(ctx *gin.Context, user User) *Result {
+	easyGin.POST("/post", func(ctx *gin.Context, user User) *Response {
 		fmt.Println(user)
 		return nil
 	})
@@ -115,15 +117,65 @@ func TestEasyGin(t *testing.T) {
 
 }
 
+func TestMarshalJson(t *testing.T) {
+	resp := FailData(NewError(2, "fail"), "failed")
+	bytes, err := json.Marshal(&resp.R)
+	if err != nil {
+		t.Error(err)
+	}
+	t.Log(string(bytes))
+
+	resp = FailData(NewError(2, "fail"), nil)
+	bytes, err = json.Marshal(&resp.R)
+	if err != nil {
+		t.Error(err)
+	}
+	t.Log(string(bytes))
+
+	type UserInfo struct {
+		Id       int    `json:"id"`
+		Username string `json:"username"`
+	}
+
+	resp = FailData(NewError(2, "fail"), &UserInfo{Id: 1, Username: "aabb"})
+	bytes, err = json.Marshal(&resp.R)
+	if err != nil {
+		t.Error(err)
+	}
+	t.Log(string(bytes))
+}
+
+var UsernameInvalidErr = &RespErrorImpl{
+	Codee:    1,
+	Messagee: "username invalid",
+}
+
+func checkUsername() error {
+	return UsernameInvalidErr
+}
+
 func TestFunction(t *testing.T) {
 	easyGin := New()
-	easyGin.POST("/post", func(ctx *gin.Context, user *User) *Result {
-		return Ok(user)
+
+	easyGin.GET("/test", func(ctx *gin.Context) *Response {
+		err := checkUsername()
+		if IsRespError(err) {
+			return Fail(AsRespError(err))
+		}
+		if err != nil {
+			return Fail(NewFromError(err))
+		}
+
+		return OkData("ok")
+	})
+
+	easyGin.POST("/post", func(ctx *gin.Context, user *User) *Response {
+		return OkData(user)
 	})
 
 	group := easyGin.Group("/api")
-	group.POST("/post", func(ctx *gin.Context, user *User) *Result {
-		return Ok(user)
+	group.POST("/post", func(ctx *gin.Context, user *User) *Response {
+		return OkData(user)
 	})
 
 	easyGin.SetAfterCloseHandlers(func() {
@@ -214,7 +266,7 @@ func BenchmarkNormal(b *testing.B) {
 
 func BenchmarkReflectPointer(b *testing.B) {
 	ctx := ginContext()
-	f := ginHandlers(func(ctx *gin.Context, user *User) *Result {
+	f := ginHandlers(func(ctx *gin.Context, user *User) *Response {
 		return nil
 	})[0]
 
@@ -225,7 +277,7 @@ func BenchmarkReflectPointer(b *testing.B) {
 
 func BenchmarkReflect(b *testing.B) {
 	ctx := ginContext()
-	f := ginHandlers(func(ctx *gin.Context, user User) *Result {
+	f := ginHandlers(func(ctx *gin.Context, user User) *Response {
 		return nil
 	})[0]
 
@@ -250,7 +302,7 @@ func BenchmarkNormalQuery(b *testing.B) {
 
 func BenchmarkReflectQuery(b *testing.B) {
 	ctx := ginQueryContext()
-	f := ginHandlers(func(ctx *gin.Context, id int, username, password, email string) *Result {
+	f := ginHandlers(func(ctx *gin.Context, id int, username, password, email string) *Response {
 		return nil
 	})[0]
 
@@ -273,11 +325,49 @@ func BenchmarkStructQuery(b *testing.B) {
 
 func BenchmarkStructReflectQuery(b *testing.B) {
 	ctx := ginQueryContext()
-	f := ginHandlers(func(ctx *gin.Context, user *User) *Result {
+	f := ginHandlers(func(ctx *gin.Context, user *User) *Response {
 		return nil
 	})[0]
 
 	for i := 0; i < b.N; i++ {
 		f(ctx)
 	}
+}
+
+type Resp struct {
+	Id   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+func TestResponseAndError(t *testing.T) {
+	server := NewWithEngine(gin.New())
+	server.GET("/test", func(ctx *gin.Context) *Response {
+		resp, err := service()
+		if err != nil {
+			t.Log("err:", err)
+			if IsRespError(err) {
+				return Fail(AsRespError(err))
+			}
+			return Fail(NewFromError(err))
+		}
+
+		return OkData(resp)
+	})
+
+	server.ListenAndServe(":8080")
+}
+
+func service() (*Resp, error) {
+	n := rand.Intn(3)
+	switch n {
+	case 1:
+		return nil, NewError(1, "test")
+	case 2:
+		return nil, errors.New("internal error")
+	}
+
+	return &Resp{
+		Id:   1,
+		Name: "ape",
+	}, nil
 }

@@ -23,26 +23,26 @@ import (
 	NOTE: the first parameter must be the type of *gin.Context
 	1.bind values from body to struct, you can use the following forms:
 		type User struct {
-			Id int `json:"id"`
+			ID int `json:"id"`
 			Username string `json:"username"`
 		}
-		1.1 func mycontroller(ctx *gin.Context, u User) *Result
-		1.2 func mycontroller(ctx *gin.Context, u *User) *Result
+		1.1 func mycontroller(ctx *gin.Context, u User) *Response
+		1.2 func mycontroller(ctx *gin.Context, u *User) *Response
 	NOTE: using this method will reduce performance by 20%, 2500ns/op --> 3000ns/op
 
 	2.bind values from url(etc.: id=1&username=aabb), you can use the following forms:
 		type User struct {
-			Id int `form:"id"`
+			ID int `form:"id"`
 			Username string `form:"username"`
 		}
-		2.1 func mycontroller(ctx *gin.Context, u User) *Result
-		2.2 func mycontroller(ctx *gin.Context, u *User) *Result
+		2.1 func mycontroller(ctx *gin.Context, u User) *Response
+		2.2 func mycontroller(ctx *gin.Context, u *User) *Response
 	NOTE: using this method will reduce performance by 20%, 2200ns/op --> 2700ns/op
 
 	3. get values from url(etc.: id=1&username=aabb)(supported types are int(int, int8 ...), uint(uint, uint8...), string),
        you can use the following forms:
 	   Note: The order of parameters in the function must be consistent with the key value pairs in the url
-		3.1 func mycontroller(ctx *gin.Context, id int, username string) *Result
+		3.1 func mycontroller(ctx *gin.Context, id int, username string) *Response
 	NOTE: using this method can significantly reduce data acquisition performance, 50ns/op --> 1800ns/op
 		  but for the business, this loss can be negligible
 */
@@ -50,7 +50,7 @@ import (
 type EasyGin struct {
 	*gin.Engine
 	Server             *http.Server
-	signalHandler      func()
+	signalHandler      func() context.Context
 	afterCloseHandlers []func()
 	maxGraceDuration   time.Duration
 }
@@ -81,12 +81,12 @@ func SetLogOutput(out io.Writer) {
 }
 
 // Handler must be in one of the following forms
-// func(ctx *gin.Context) *Result
-// func(ctx *gin.Context, u UserType) *Result
+// func(ctx *gin.Context) *Response
+// func(ctx *gin.Context, u UserType) *Response
 // must have one or two parameter
 // first param: must be *gin.Context
 // second param: must be a struct or a pointer of struct
-// return value must be *Result
+// return value must be *Response
 type Handler interface{}
 
 func (e *EasyGin) GET(relativePath string, handlers ...Handler) {
@@ -121,7 +121,7 @@ func (e *EasyGin) Group(relativePath string, handlers ...Handler) *RouterGroup {
 // SetSignalHandler set signal processing functions
 // if the signal processing function is set when calling this method,
 // the registered afterCloseHandlers will not work
-func (e *EasyGin) SetSignalHandler(f func()) {
+func (e *EasyGin) SetSignalHandler(f func() context.Context) {
 	e.signalHandler = f
 }
 
@@ -132,22 +132,25 @@ func (e *EasyGin) SetAfterCloseHandlers(handlers ...func()) {
 
 func (e *EasyGin) setupSignal() {
 	if e.signalHandler == nil {
-		e.signalHandler = func() {
-			SetupSignal(func() {
-				for _, handler := range e.afterCloseHandlers {
-					handler()
-				}
-
-				ctx, cancelFunc := context.WithTimeout(context.Background(), e.maxGraceDuration)
-				defer cancelFunc()
-				if err := e.Server.Shutdown(ctx); err != nil {
-					elog.Printf("An error occurs when Server shut:%v", err)
-				}
-			})
-		}
+		e.signalHandler = SetupSignalHandler
 	}
 
-	go e.signalHandler()
+	ctx := e.signalHandler()
+
+	go func() {
+		<-ctx.Done()
+
+		for _, handler := range e.afterCloseHandlers {
+			handler()
+		}
+
+		ctx, cancelFunc := context.WithTimeout(context.Background(), e.maxGraceDuration)
+		defer cancelFunc()
+		if err := e.Server.Shutdown(ctx); err != nil {
+			elog.Printf("An error occurs when Server shut:%v", err)
+		}
+	}()
+
 }
 
 func (e *EasyGin) ListenAndServe(addr string) error {
@@ -188,7 +191,7 @@ func (r *RouterGroup) PUT(relativePath string, handlers ...Handler) {
 
 var (
 	ginCtxType = reflect.TypeOf(&gin.Context{})
-	outType    = reflect.TypeOf(&Result{})
+	outType    = reflect.TypeOf(&Response{})
 )
 
 const (
@@ -208,11 +211,11 @@ func ginHandlers(handlers ...Handler) []gin.HandlerFunc {
 
 		// 检查返回值类型，返回值必须只有一个，并且是*Result类型
 		if ft.NumOut() == 0 || ft.NumOut() > 1 {
-			panic("return value must have one and be *Result type")
+			panic("return value must have one and be *Response type")
 		}
 		outt := ft.Out(0)
 		if outt != outType {
-			panic("return value must be *Result type")
+			panic("return value must be *Response type")
 		}
 
 		return func(ctx *gin.Context) {
@@ -237,7 +240,7 @@ func ginHandlers(handlers ...Handler) []gin.HandlerFunc {
 			}
 
 			outVals := fv.Call(inValues)
-			result := outVals[0].Interface().(*Result)
+			result := outVals[0].Interface().(*Response)
 			if result == nil {
 				return
 			}
